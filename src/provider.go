@@ -1,12 +1,16 @@
 package src
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/likexian/doh-go"
+	"github.com/likexian/doh-go/dns"
 
 	m3u "../src/internal/m3u-parser"
 )
@@ -275,9 +279,36 @@ func getProviderData(fileType, fileID string) (err error) {
 	return
 }
 
+func triggerDOH(urlString string) (newUrl string, err error) {
+	urlParsed, err := url.Parse(urlString)
+	if err != nil {
+		return
+	}
+
+	newUrl = urlString
+
+	// init a context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	c := doh.Use(doh.CloudflareProvider, doh.GoogleProvider)
+
+	// do doh query
+	// use different err variable to not return this error and try to continue
+	rsp, err2 := c.Query(ctx, dns.Domain(urlParsed.Host), dns.TypeA)
+	if err2 == nil {
+		newUrl = strings.ReplaceAll(urlString, urlParsed.Host, rsp.Answer[0].Data)
+	}
+
+	// close the client
+	c.Close()
+
+	return
+}
+
 func downloadFileFromServer(providerURL string) (filename string, body []byte, err error) {
 
-	_, err = url.ParseRequestURI(providerURL)
+	providerURL, err = triggerDOH(providerURL)
 	if err != nil {
 		return
 	}
