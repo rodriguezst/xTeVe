@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -279,29 +280,44 @@ func getProviderData(fileType, fileID string) (err error) {
 	return
 }
 
-func triggerDOH(urlString string) (newUrl string, err error) {
+func isIP(hostname string) bool {
+	return (net.ParseIP(hostname) != nil)
+}
+
+func triggerDOH(urlString string) (newURL string, err error) {
 	urlParsed, err := url.Parse(urlString)
 	if err != nil {
 		return
 	}
 
-	newUrl = urlString
+	hostname := urlParsed.Hostname()
+	newURL = urlString
+
+	// skip doh when hostname is already an IP address
+	if isIP(hostname) {
+		return
+	}
 
 	// init a context
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	c := doh.Use(doh.CloudflareProvider, doh.GoogleProvider)
+	//c := doh.Use()
 
 	// do doh query
-	// use different err variable to not return this error and try to continue
-	rsp, err2 := c.Query(ctx, dns.Domain(urlParsed.Host), dns.TypeA)
-	if err2 == nil {
-		newUrl = strings.ReplaceAll(urlString, urlParsed.Host, rsp.Answer[0].Data)
+	rsp, err := c.Query(ctx, dns.Domain(hostname), dns.TypeA)
+	if err == nil {
+		urlParsed.Host = strings.ReplaceAll(urlParsed.Host, hostname, rsp.Answer[0].Data)
+		newURL = urlParsed.String()
+	} else {
+		showInfo(err.Error())
 	}
 
 	// close the client
 	c.Close()
+
+	showInfo("DOH:" + hostname + " -> " + urlParsed.Hostname())
 
 	return
 }
